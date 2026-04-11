@@ -1,0 +1,13 @@
+=>Normal Traffic Condition
+No Command used
+
+=>Medium Traffic Condition
+Command used:
+
+sudo hping3 -S -p 80 -c 20000 -i u1000 127.0.0.1
+
+
+=?High Traffic Condition
+Command used:
+
+sudo hping3 -S -p 80 -c 50000 -i u100 127.0.0.1
