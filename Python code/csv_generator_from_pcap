@@ -9,15 +9,16 @@ import numpy as np
 from scapy.all import rdpcap, TCP, IP
 from scapy.layers.inet import IP, TCP
 from collections import defaultdict
-import argparse
 import os
 import warnings
+
 warnings.filterwarnings('ignore')
+
 
 def extract_tcp_metrics(pcap_file, output_csv):
     """
     Extract TCP metrics from PCAP file
-    
+
     Metrics extracted:
     - time_s: Timestamp (seconds)
     - total_packets: Packets in this time window
@@ -37,11 +38,11 @@ def extract_tcp_metrics(pcap_file, output_csv):
     - ooo_rate_pct: Out-of-order packet percentage
     - avg_window: Average window size
     """
-    
+
     print(f"Reading PCAP file: {pcap_file}")
     packets = rdpcap(pcap_file)
     print(f"Total packets: {len(packets)}")
-    
+
     # Track TCP streams
     streams = defaultdict(lambda: {
         'seq_base': None,
@@ -57,7 +58,7 @@ def extract_tcp_metrics(pcap_file, output_csv):
         'data_bytes': 0,
         'retransmitted_bytes': 0
     })
-    
+
     # Store metrics per second
     metrics_per_second = defaultdict(lambda: {
         'packets': 0,
@@ -74,57 +75,55 @@ def extract_tcp_metrics(pcap_file, output_csv):
         'goodput_bytes': 0,
         'ooo_count': 0
     })
-    
+
     # Track sequence numbers for retransmission detection
     seen_seqs = defaultdict(set)
-    seq_to_time = defaultdict(dict)
-    
+
     # Track in-flight bytes per stream
     sent_packets = defaultdict(dict)  # seq -> packet_info
-    
+
     print("Processing packets...")
-    
+
     for pkt in packets:
         if not pkt.haslayer(TCP) or not pkt.haslayer(IP):
             continue
-            
+
         tcp = pkt[TCP]
         ip = pkt[IP]
-        
+
         # Identify stream using (src_ip, src_port, dst_ip, dst_port)
         stream_key = (ip.src, tcp.sport, ip.dst, tcp.dport)
         rev_stream_key = (ip.dst, tcp.dport, ip.src, tcp.sport)
-        
+
         # Use consistent stream direction
         if stream_key in streams or len(streams[stream_key]['timestamps']) > 0:
             stream = streams[stream_key]
         else:
             stream = streams[rev_stream_key]
-        
+
         timestamp = float(pkt.time)
         second = int(timestamp)
-        
+
         # Update per-second packet count
         metrics_per_second[second]['packets'] += 1
-        
+
         # Extract TCP flags
         is_syn = tcp.flags & 0x02
         is_ack = tcp.flags & 0x10
         is_fin = tcp.flags & 0x01
         is_rst = tcp.flags & 0x04
-        is_push = tcp.flags & 0x08
-        
+
         # Calculate payload length
         payload_len = len(tcp.payload)
-        
+
         # Get window size
         window_size = tcp.window
         metrics_per_second[second]['window_sizes'].append(window_size)
-        
+
         # Track data bytes
         if payload_len > 0 and not is_syn and not is_fin and not is_rst:
             metrics_per_second[second]['data_bytes'] += payload_len
-            
+
             # Check for retransmission
             seq_num = tcp.seq
             if seq_num in seen_seqs[stream_key]:
@@ -138,7 +137,7 @@ def extract_tcp_metrics(pcap_file, output_csv):
                     'time': timestamp,
                     'size': payload_len
                 }
-        
+
         # Track bytes in flight (unacknowledged data)
         if is_ack:
             ack_num = tcp.ack
@@ -149,7 +148,7 @@ def extract_tcp_metrics(pcap_file, output_csv):
                     to_remove.append(seq)
             for seq in to_remove:
                 del sent_packets[stream_key][seq]
-        
+
         # Current bytes in flight
         bif = sum([pkt_info['size'] for pkt_info in sent_packets[stream_key].values()])
         if bif > 0:
@@ -157,7 +156,7 @@ def extract_tcp_metrics(pcap_file, output_csv):
             metrics_per_second[second]['bytes_in_flight_count'] += 1
             if bif > metrics_per_second[second]['bytes_in_flight_max']:
                 metrics_per_second[second]['bytes_in_flight_max'] = bif
-        
+
         # Track SACK blocks (if present in TCP options)
         sack_count = 0
         if tcp.options:
@@ -165,11 +164,11 @@ def extract_tcp_metrics(pcap_file, output_csv):
                 if opt[0] == 'SAck':
                     sack_blocks = opt[1]
                     sack_count = len(sack_blocks) if isinstance(sack_blocks, list) else 1
-        
+
         if sack_count > 0:
             metrics_per_second[second]['sack_count'] += sack_count
             stream['sack_blocks'].append(timestamp)
-        
+
         # Detect duplicate ACKs
         if is_ack and payload_len == 0:
             ack_num = tcp.ack
@@ -177,9 +176,8 @@ def extract_tcp_metrics(pcap_file, output_csv):
                 metrics_per_second[second]['dupacks'] += 1
                 stream['dupacks'] += 1
             stream['last_ack'] = ack_num
-        
+
         # Detect out-of-order packets
-        # (Simplified: if sequence number is less than last seen but not duplicate)
         if payload_len > 0:
             seq_num = tcp.seq
             if 'max_seen_seq' in stream:
@@ -190,15 +188,15 @@ def extract_tcp_metrics(pcap_file, output_csv):
                     stream['max_seen_seq'] = seq_num
             else:
                 stream['max_seen_seq'] = seq_num
-        
+
         # Detect zero window probes (window size 0)
         if window_size == 0:
             metrics_per_second[second]['zero_window_probes'] += 1
             stream['zero_window'] += 1
-        
+
         stream['timestamps'].append(timestamp)
         stream['window_sizes'].append(window_size)
-    
+
     # Calculate MSS average
     mss_values = []
     for pkt in packets:
@@ -206,45 +204,45 @@ def extract_tcp_metrics(pcap_file, output_csv):
             for opt in pkt[TCP].options:
                 if opt[0] == 'MSS':
                     mss_values.append(opt[1])
-    
+
     avg_mss = np.mean(mss_values) if mss_values else 1460
-    
+
     # Build final dataframe
     print("Building metrics dataframe...")
-    
+
     results = []
     seconds = sorted(metrics_per_second.keys())
-    
+
     for second in seconds:
         data = metrics_per_second[second]
-        
+
         # Calculate throughput (bits per second)
-        throughput_bps = (data['data_bytes'] * 8) / 1.0  # per second window
-        
+        throughput_bps = (data['data_bytes'] * 8) / 1.0
+
         # Calculate goodput (bits per second, excluding retransmissions)
         goodput_bps = (data['goodput_bytes'] * 8) / 1.0
-        
+
         # Calculate average bytes in flight
         if data['bytes_in_flight_count'] > 0:
             bif_avg = data['bytes_in_flight_sum'] / data['bytes_in_flight_count']
         else:
             bif_avg = 0
-        
+
         # Calculate retransmission rate percentage
         if data['packets'] > 0:
             retrans_rate = (data['retransmissions'] / data['packets']) * 100
         else:
             retrans_rate = 0
-        
+
         # Calculate out-of-order rate percentage
         if data['packets'] > 0:
             ooo_rate = (data['ooo_packets'] / data['packets']) * 100
         else:
             ooo_rate = 0
-        
+
         # Calculate average window size
         avg_window = np.mean(data['window_sizes']) if data['window_sizes'] else 0
-        
+
         results.append({
             'time_s': second,
             'total_packets': data['packets'],
@@ -264,30 +262,50 @@ def extract_tcp_metrics(pcap_file, output_csv):
             'ooo_rate_pct': ooo_rate,
             'avg_window': avg_window
         })
-    
+
     # Create dataframe
     df = pd.DataFrame(results)
-    
+
     # Save to CSV
     df.to_csv(output_csv, index=False)
     print(f"\n✅ Metrics saved to: {output_csv}")
     print(f"   Total rows: {len(df)}")
     print(f"   Columns: {list(df.columns)}")
-    
+
     return df
 
-def main():
-    parser = argparse.ArgumentParser(description='Convert PCAP to TCP metrics CSV')
-    parser.add_argument('input_pcap', help='Input PCAP file path')
-    parser.add_argument('-o', '--output', help='Output CSV file path', default='tcp_metrics.csv')
-    
-    args = parser.parse_args()
-    
-    if not os.path.exists(args.input_pcap):
-        print(f"Error: File not found - {args.input_pcap}")
-        return
-    
-    extract_tcp_metrics(args.input_pcap, args.output)
+
+# ============================================
+# ENTER YOUR PCAP FILE PATH HERE
+# ============================================
 
 if __name__ == "__main__":
-    main()
+    # ========================================
+    # EDIT THESE PATHS FOR YOUR FILES
+    # ========================================
+    
+    # Example paths - REPLACE with your actual file paths
+    INPUT_PCAP = r"D:\college\4th semester\Computer networks\da2\normal_traffic.pcap"
+    OUTPUT_CSV = r"D:\college\4th semester\Computer networks\da2\normal_metrics.csv"
+    
+    # ========================================
+    # Uncomment and edit for other traffic conditions:
+    # ========================================
+    
+    # For Medium traffic:
+    # INPUT_PCAP = r"D:\college\4th semester\Computer networks\da2\medium_traffic.pcap"
+    # OUTPUT_CSV = r"D:\college\4th semester\Computer networks\da2\medium_metrics.csv"
+    
+    # For High traffic:
+    # INPUT_PCAP = r"D:\college\4th semester\Computer networks\da2\high_traffic.pcap"
+    # OUTPUT_CSV = r"D:\college\4th semester\Computer networks\da2\high_metrics.csv"
+    
+    # ========================================
+    
+    # Check if file exists and run
+    if not os.path.exists(INPUT_PCAP):
+        print(f"❌ Error: PCAP file not found at: {INPUT_PCAP}")
+        print("\n💡 Please update the INPUT_PCAP variable with the correct path to your PCAP file.")
+        print(f"   Current path: {INPUT_PCAP}")
+    else:
+        extract_tcp_metrics(INPUT_PCAP, OUTPUT_CSV)
