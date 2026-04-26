@@ -1,1 +1,643 @@
+"""
+plot_all_tcp_metrics.py
+Generates 20 TCP performance graphs from CSV metrics
+Includes 7 blog graphs + 13 additional diagnostic graphs
+"""
 
+import pandas as pd
+import matplotlib
+import matplotlib.pyplot as plt
+import numpy as np
+import os
+import warnings
+
+warnings.filterwarnings('ignore')
+
+# ============================================
+# FIX: Use Agg backend (no Tkinter required)
+# ============================================
+matplotlib.use('Agg')  # Use non-interactive backend that doesn't need Tcl/Tk
+
+# ============================================
+# FILE PATHS - USE RAW STRINGS OR FORWARD SLASHES
+# ============================================
+
+# Option 1: Use raw strings (r"...") - RECOMMENDED
+normal_csv = r"D:\college\4th semester\Computer networks\da2\cnda2_all_metrics.csv"
+medium_csv = r"D:\college\4th semester\Computer networks\da2\mid traffic da2_all_metricmidtraffic.csv"
+high_csv = r"D:\college\4th semester\Computer networks\da2\high traffic da2_all_metricshightraffic.csv"
+
+# Output directory
+OUTPUT_DIR = r"E:\datasets\smart traffic system\agent\tcp_graphs"
+
+# Set style for publication-quality graphs
+plt.style.use('seaborn-v0_8-darkgrid')
+plt.rcParams['figure.figsize'] = (12, 8)
+plt.rcParams['font.size'] = 11
+plt.rcParams['axes.titlesize'] = 14
+plt.rcParams['axes.labelsize'] = 12
+plt.rcParams['legend.fontsize'] = 10
+plt.rcParams['savefig.dpi'] = 300
+plt.rcParams['savefig.bbox'] = 'tight'
+
+# Color scheme
+COLORS = {
+    'Normal': '#1f77b4',  # Blue
+    'Medium': '#ff7f0e',  # Orange
+    'High': '#2ca02c',  # Green
+    'Threshold': '#d62728'  # Red
+}
+
+
+# ============================================
+# DATA LOADING
+# ============================================
+
+def load_data():
+    """Load all three CSV files"""
+    print("Loading CSV files...")
+    print(f"  Normal: {normal_csv}")
+    print(f"  Medium: {medium_csv}")
+    print(f"  High: {high_csv}")
+
+    # Check if files exist
+    for path in [normal_csv, medium_csv, high_csv]:
+        if not os.path.exists(path):
+            print(f"  ERROR: File not found - {path}")
+            return None, None, None, None
+
+    normal_df = pd.read_csv(normal_csv)
+    medium_df = pd.read_csv(medium_csv)
+    high_df = pd.read_csv(high_csv)
+
+    # Add condition column
+    normal_df['condition'] = 'Normal'
+    medium_df['condition'] = 'Medium'
+    high_df['condition'] = 'High'
+
+    # Combine for multi-condition plots
+    all_df = pd.concat([normal_df, medium_df, high_df], ignore_index=True)
+
+    # Basic info
+    print("\n✅ Data loaded successfully:")
+    for name, df in [('Normal', normal_df), ('Medium', medium_df), ('High', high_df)]:
+        print(f"  {name}: {len(df)} rows")
+
+    return normal_df, medium_df, high_df, all_df
+
+
+# ============================================
+# HELPER FUNCTIONS
+# ============================================
+
+def save_fig(filename):
+    """Save figure to output directory"""
+    if not os.path.exists(OUTPUT_DIR):
+        os.makedirs(OUTPUT_DIR)
+    filepath = os.path.join(OUTPUT_DIR, filename)
+    plt.savefig(filepath, dpi=300, bbox_inches='tight')
+    print(f"  ✓ Saved: {filename}")
+    plt.close()
+
+
+def add_condition_scatter(ax, df, x_col, y_col, condition):
+    """Add scatter plot for a specific condition"""
+    mask = df['condition'] == condition
+    data = df.loc[mask, [x_col, y_col]].dropna()
+    if len(data) > 0:
+        ax.scatter(data[x_col], data[y_col],
+                   alpha=0.5, s=15, label=condition, color=COLORS[condition])
+
+
+# ============================================
+# PART 1: BLOG'S 7 CORE GRAPHS
+# ============================================
+
+def graph_01_bif_vs_throughput(df):
+    """GRAPH 1: BIF vs Throughput"""
+    print("\n📊 Generating GRAPH 1: BIF vs Throughput")
+    fig, ax = plt.subplots()
+    for condition in ['Normal', 'Medium', 'High']:
+        add_condition_scatter(ax, df, 'bytes_in_flight_avg', 'throughput_bps', condition)
+
+    ax.set_xlabel('Bytes In Flight (bytes)')
+    ax.set_ylabel('Throughput (bps)')
+    ax.set_title('GRAPH 1: BIF vs Throughput\n(Retransmission Root Cause)')
+    ax.legend()
+    ax.set_xscale('symlog')
+    ax.grid(True, alpha=0.3)
+    save_fig('01_BIF_vs_Throughput.png')
+
+
+def graph_02_sack_vs_retransmissions(df):
+    """GRAPH 2: SACK Count vs Retransmissions"""
+    print("📊 Generating GRAPH 2: SACK vs Retransmissions")
+    fig, ax = plt.subplots()
+    for condition in ['Normal', 'Medium', 'High']:
+        add_condition_scatter(ax, df, 'sack_count', 'retransmissions', condition)
+
+    ax.axhline(y=15, color=COLORS['Threshold'], linestyle='--', alpha=0.7,
+               label='SACK Saturation Threshold (~15 retrans)')
+    ax.set_xlabel('SACK Count')
+    ax.set_ylabel('Retransmissions')
+    ax.set_title('GRAPH 2: SACK Count vs Retransmissions\n(SACK Breaks at ~15 Retransmissions)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    save_fig('02_SACK_vs_Retransmissions.png')
+
+
+def graph_03_window_vs_throughput(df):
+    """GRAPH 3: Window Size vs Throughput"""
+    print("📊 Generating GRAPH 3: Window vs Throughput")
+    fig, ax = plt.subplots()
+    for condition in ['Normal', 'Medium', 'High']:
+        add_condition_scatter(ax, df, 'window_size', 'throughput_bps', condition)
+
+    ax.set_xlabel('Window Size')
+    ax.set_ylabel('Throughput (bps)')
+    ax.set_title('GRAPH 3: Window Size vs Throughput\n(AIMD Sawtooth vs Death Spiral)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    save_fig('03_Window_vs_Throughput.png')
+
+
+def graph_04_bif_vs_time(normal_df, medium_df, high_df):
+    """GRAPH 4: BIF vs Time Series"""
+    print("📊 Generating GRAPH 4: BIF vs Time")
+    fig, ax = plt.subplots(figsize=(14, 6))
+
+    # Normal (filter outliers)
+    mask = normal_df['bytes_in_flight_avg'] < 1e6
+    if mask.any():
+        ax.plot(normal_df.loc[mask, 'time_s'], normal_df.loc[mask, 'bytes_in_flight_avg'],
+                label='Normal', color=COLORS['Normal'], linewidth=1.5, alpha=0.8)
+
+    # Medium
+    ax.plot(medium_df['time_s'], medium_df['bytes_in_flight_avg'],
+            label='Medium', color=COLORS['Medium'], linewidth=1.5, alpha=0.8)
+
+    # High
+    ax.plot(high_df['time_s'], high_df['bytes_in_flight_avg'],
+            label='High', color=COLORS['High'], linewidth=1.5, alpha=0.8)
+
+    ax.set_xlabel('Time (seconds)')
+    ax.set_ylabel('Bytes In Flight (bytes)')
+    ax.set_title('GRAPH 4: BIF vs Time Series\n(Bufferbloat in Medium Traffic)')
+    ax.legend()
+    ax.set_yscale('log')
+    ax.grid(True, alpha=0.3, which='both')
+
+    ax.annotate('Bufferbloat Region\n(BIF ~4.5GB)',
+                xy=(320, 4.5e9), xytext=(350, 1e10),
+                arrowprops=dict(arrowstyle='->', color=COLORS['Threshold']),
+                fontsize=10, color=COLORS['Threshold'])
+
+    save_fig('04_BIF_vs_Time.png')
+
+
+def graph_05_retransmissions_vs_goodput(df):
+    """GRAPH 5: Retransmissions vs Goodput"""
+    print("📊 Generating GRAPH 5: Retransmissions vs Goodput")
+    fig, ax = plt.subplots()
+    for condition in ['Normal', 'Medium', 'High']:
+        add_condition_scatter(ax, df, 'retransmissions', 'goodput_bps', condition)
+
+    ax.set_xlabel('Retransmissions')
+    ax.set_ylabel('Goodput (bps)')
+    ax.set_title('GRAPH 5: Retransmissions vs Goodput\n(Real Cost of Retransmissions)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    save_fig('05_Retransmissions_vs_Goodput.png')
+
+
+def graph_06_sack_vs_dupacks(df):
+    """GRAPH 6: SACK Count vs DupACKs"""
+    print("📊 Generating GRAPH 6: SACK vs DupACKs")
+    fig, ax = plt.subplots()
+    for condition in ['Normal', 'Medium', 'High']:
+        add_condition_scatter(ax, df, 'sack_count', 'dupacks', condition)
+
+    ax.set_xlabel('SACK Count')
+    ax.set_ylabel('Duplicate ACKs')
+    ax.set_title('GRAPH 6: SACK Count vs DupACKs\n(DupACK-to-SACK Ratio as Congestion Fingerprint)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    save_fig('06_SACK_vs_DupACKs.png')
+
+
+def graph_07_bif_vs_sack(df):
+    """GRAPH 7: BIF vs SACK Count"""
+    print("📊 Generating GRAPH 7: BIF vs SACK")
+    fig, ax = plt.subplots()
+    for condition in ['Normal', 'Medium', 'High']:
+        add_condition_scatter(ax, df, 'bytes_in_flight_avg', 'sack_count', condition)
+
+    ax.set_xlabel('Bytes In Flight (bytes)')
+    ax.set_ylabel('SACK Count')
+    ax.set_title('GRAPH 7: BIF vs SACK Count\n(SACK Degrades as BIF Increases)')
+    ax.legend()
+    ax.set_xscale('symlog')
+    ax.grid(True, alpha=0.3)
+
+    ax.annotate('SACK Saturation\n(4 → 2 → 1 blocks)',
+                xy=(4.5e9, 2), xytext=(1e8, 3.5),
+                arrowprops=dict(arrowstyle='->', color=COLORS['Threshold']),
+                fontsize=10, color=COLORS['Threshold'])
+
+    save_fig('07_BIF_vs_SACK.png')
+
+
+# ============================================
+# PART 2: 13 ADDITIONAL DIAGNOSTIC GRAPHS
+# ============================================
+
+def graph_08_cumulative_retransmissions(normal_df, medium_df, high_df):
+    """GRAPH 8: Cumulative Retransmissions over Time"""
+    print("📊 Generating GRAPH 8: Cumulative Retransmissions")
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for df, condition in [(normal_df, 'Normal'), (medium_df, 'Medium'), (high_df, 'High')]:
+        df_sorted = df.sort_values('time_s')
+        cumulative = df_sorted['retransmissions'].cumsum()
+        ax.plot(df_sorted['time_s'], cumulative, label=condition, color=COLORS[condition], linewidth=2)
+
+    ax.set_xlabel('Time (seconds)')
+    ax.set_ylabel('Cumulative Retransmissions')
+    ax.set_title('GRAPH 8: Cumulative Retransmissions over Time\n(When Does System Enter Unrecoverable Region?)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    save_fig('08_Cumulative_Retransmissions.png')
+
+
+def graph_09_retrans_rate_vs_time(normal_df, medium_df, high_df):
+    """GRAPH 9: Retransmission Rate (per sec) vs Time"""
+    print("📊 Generating GRAPH 9: Retransmission Rate vs Time")
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for df, condition in [(normal_df, 'Normal'), (medium_df, 'Medium'), (high_df, 'High')]:
+        # Group by second
+        df_grouped = df.groupby('time_s')['retransmissions'].sum().reset_index()
+        ax.plot(df_grouped['time_s'], df_grouped['retransmissions'],
+                label=condition, color=COLORS[condition], linewidth=1.5, alpha=0.7)
+
+    ax.axhline(y=15, color=COLORS['Threshold'], linestyle='--', alpha=0.7,
+               label='SACK Saturation Threshold (15 retrans/sec)')
+    ax.set_xlabel('Time (seconds)')
+    ax.set_ylabel('Retransmissions per Second')
+    ax.set_title('GRAPH 9: Retransmission Rate vs Time\n(Visualizing the 15 retrans/sec Threshold)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    save_fig('09_Retrans_Rate_vs_Time.png')
+
+
+def graph_10_normalized_throughput(df):
+    """GRAPH 10: Normalized Throughput (Efficiency) over Time"""
+    print("📊 Generating GRAPH 10: Normalized Throughput")
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for condition in ['Normal', 'Medium', 'High']:
+        mask = df['condition'] == condition
+        subset = df[mask].copy()
+
+        # Avoid division by zero
+        efficiency = np.where(subset['throughput_bps'] > 0,
+                              (subset['goodput_bps'] / subset['throughput_bps']) * 100, 0)
+
+        ax.scatter(subset['time_s'], efficiency,
+                   alpha=0.5, s=10, label=condition, color=COLORS[condition])
+
+    ax.set_xlabel('Time (seconds)')
+    ax.set_ylabel('Efficiency (Goodput/Throughput × 100%)')
+    ax.set_title('GRAPH 10: Normalized Throughput Efficiency\n(Retransmission Overhead Visualization)')
+    ax.legend()
+    ax.set_ylim(0, 105)
+    ax.grid(True, alpha=0.3)
+    save_fig('10_Normalized_Throughput.png')
+
+
+def graph_11_sack_efficiency(df):
+    """GRAPH 11: SACK Efficiency (Derived Metric)"""
+    print("📊 Generating GRAPH 11: SACK Efficiency")
+    fig, ax = plt.subplots()
+
+    for condition in ['Normal', 'Medium', 'High']:
+        mask = df['condition'] == condition
+        subset = df[mask].copy()
+
+        # SACK Efficiency = 1 - (Retrans / (DupACKs/3))
+        potential_retrans = subset['dupacks'] / 3
+        sack_eff = np.where(potential_retrans > 0,
+                            1 - np.clip(subset['retransmissions'] / potential_retrans, 0, 1), 1)
+
+        ax.scatter(subset['time_s'], sack_eff,
+                   alpha=0.5, s=10, label=condition, color=COLORS[condition])
+
+    ax.set_xlabel('Time (seconds)')
+    ax.set_ylabel('SACK Efficiency')
+    ax.set_title('GRAPH 11: SACK Efficiency over Time\n(1 = Perfect, 0 = Complete Failure)')
+    ax.legend()
+    ax.set_ylim(-0.1, 1.1)
+    ax.grid(True, alpha=0.3)
+    save_fig('11_SACK_Efficiency.png')
+
+
+def graph_12_estimated_cwnd_vs_time(df):
+    """GRAPH 12: Estimated Congestion Window vs Time"""
+    print("📊 Generating GRAPH 12: Estimated Congestion Window")
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for condition in ['Normal', 'Medium', 'High']:
+        mask = df['condition'] == condition
+        subset = df[mask].copy()
+
+        # Estimate cwnd (simplified)
+        mss = 1460
+        # Use goodput as proxy for sending rate
+        cwnd_est = np.clip(subset['goodput_bps'] / 8 / mss, 0, 100)
+
+        # Filter outliers for medium traffic (BIF artifacts)
+        if condition == 'Medium':
+            cwnd_est = np.where(cwnd_est > 100, 0, cwnd_est)
+
+        ax.plot(subset['time_s'], cwnd_est,
+                label=condition, color=COLORS[condition], linewidth=1.5, alpha=0.7)
+
+    ax.axhline(y=4, color=COLORS['Threshold'], linestyle='--', alpha=0.7,
+               label='Death Spiral Threshold (4 MSS)')
+    ax.set_xlabel('Time (seconds)')
+    ax.set_ylabel('Estimated Congestion Window (MSS)')
+    ax.set_title('GRAPH 12: Estimated Congestion Window vs Time\n(Death Spiral Below 4-6 MSS)')
+    ax.legend()
+    ax.set_ylim(0, 30)
+    ax.grid(True, alpha=0.3)
+    save_fig('12_cwnd_vs_Time.png')
+
+
+def graph_13_inter_retrans_histogram(df):
+    """GRAPH 13: Histogram of Inter-Retransmission Times"""
+    print("📊 Generating GRAPH 13: Inter-Retransmission Histogram")
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    for idx, condition in enumerate(['Normal', 'Medium', 'High']):
+        mask = df['condition'] == condition
+        subset = df[mask].sort_values('time_s')
+
+        # Find times when retransmissions occurred
+        retrans_times = subset[subset['retransmissions'] > 0]['time_s'].values
+
+        if len(retrans_times) > 1:
+            inter_times = np.diff(retrans_times) * 1000
+            inter_times = inter_times[inter_times < 1000]
+        else:
+            inter_times = []
+
+        axes[idx].hist(inter_times, bins=30, color=COLORS[condition], alpha=0.7, edgecolor='black')
+        axes[idx].set_xlabel('Time Between Retransmissions (ms)')
+        axes[idx].set_ylabel('Frequency')
+        axes[idx].set_title(f'{condition} Traffic')
+        axes[idx].grid(True, alpha=0.3)
+
+    fig.suptitle('GRAPH 13: Inter-Retransmission Time Distribution\n(Timeout-driven vs Fast-retransmit)', fontsize=14)
+    plt.tight_layout()
+    save_fig('13_Inter_Retrans_Histogram.png')
+
+
+def graph_14_bif_vs_dupacks(df):
+    """GRAPH 14: BIF vs DupACKs"""
+    print("📊 Generating GRAPH 14: BIF vs DupACKs")
+    fig, ax = plt.subplots()
+    for condition in ['Normal', 'Medium', 'High']:
+        add_condition_scatter(ax, df, 'bytes_in_flight_avg', 'dupacks', condition)
+
+    ax.set_xlabel('Bytes In Flight (bytes)')
+    ax.set_ylabel('Duplicate ACKs')
+    ax.set_title('GRAPH 14: BIF vs DupACKs\n(Does High BIF Cause DupACK Storms?)')
+    ax.legend()
+    ax.set_xscale('symlog')
+    ax.grid(True, alpha=0.3)
+    save_fig('14_BIF_vs_DupACKs.png')
+
+
+def graph_15_throughput_vs_retrans_rate(df):
+    """GRAPH 15: Throughput vs Retransmission Rate"""
+    print("📊 Generating GRAPH 15: Throughput vs Retransmission Rate")
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+    for idx, condition in enumerate(['Normal', 'Medium', 'High']):
+        mask = df['condition'] == condition
+        subset = df[mask].copy()
+
+        # Group by second to get rate
+        grouped = subset.groupby('time_s').agg({
+            'throughput_bps': 'first',
+            'retransmissions': 'sum'
+        }).reset_index()
+
+        # Filter outliers for medium traffic
+        if condition == 'Medium':
+            grouped = grouped[grouped['retransmissions'] < 100]
+
+        axes[idx].scatter(grouped['retransmissions'], grouped['throughput_bps'],
+                          alpha=0.6, s=20, color=COLORS[condition])
+        axes[idx].set_xlabel('Retransmissions per Second')
+        axes[idx].set_ylabel('Throughput (bps)')
+        axes[idx].set_title(f'{condition} Traffic')
+        axes[idx].grid(True, alpha=0.3)
+
+    fig.suptitle('GRAPH 15: Throughput vs Retransmission Rate\n(Non-linear Damage Function)', fontsize=14)
+    plt.tight_layout()
+    save_fig('15_Throughput_vs_Retrans_Rate.png')
+
+
+def graph_16_window_vs_time_panel(df):
+    """GRAPH 16: Window Size vs Time (3-panel)"""
+    print("📊 Generating GRAPH 16: Window vs Time (3-panel)")
+    fig, axes = plt.subplots(3, 1, figsize=(12, 10), sharex=True)
+
+    for idx, condition in enumerate(['Normal', 'Medium', 'High']):
+        mask = df['condition'] == condition
+        subset = df[mask].copy()
+        # Filter outliers
+        subset = subset[subset['window_size'] < 1e6]
+
+        axes[idx].plot(subset['time_s'], subset['window_size'],
+                       color=COLORS[condition], linewidth=1, alpha=0.7)
+        axes[idx].set_ylabel('Window Size')
+        axes[idx].set_title(f'{condition} Traffic')
+        axes[idx].grid(True, alpha=0.3)
+
+    axes[2].set_xlabel('Time (seconds)')
+    fig.suptitle('GRAPH 16: Window Size vs Time\n(AIMD Decay Across Traffic Conditions)', fontsize=14)
+    plt.tight_layout()
+    save_fig('16_Window_vs_Time.png')
+
+
+def graph_17_zero_window_vs_time(df):
+    """GRAPH 17: Zero Window Probes vs Time"""
+    print("📊 Generating GRAPH 17: Zero Window Probes vs Time")
+    fig, ax = plt.subplots(figsize=(12, 6))
+
+    for condition in ['Normal', 'Medium', 'High']:
+        mask = df['condition'] == condition
+        subset = df[mask].copy()
+
+        ax.scatter(subset['time_s'], subset['zero_window_probes'],
+                   alpha=0.5, s=20, label=condition, color=COLORS[condition])
+
+    ax.set_xlabel('Time (seconds)')
+    ax.set_ylabel('Zero Window Probes')
+    ax.set_title('GRAPH 17: Zero Window Probes vs Time\n(Receiver Buffer Exhaustion Indicator)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    save_fig('17_ZeroWindow_vs_Time.png')
+
+
+def graph_18_goodput_vs_bif_combined(normal_df, medium_df, high_df):
+    """GRAPH 18: Goodput vs BIF (log-log, 3 conditions combined)"""
+    print("📊 Generating GRAPH 18: Goodput vs BIF Combined (Log-Log)")
+    fig, ax = plt.subplots()
+
+    # Filter valid data for each condition
+    for df, condition in [(normal_df, 'Normal'), (medium_df, 'Medium'), (high_df, 'High')]:
+        mask = (df['goodput_bps'] > 0) & (df['bytes_in_flight_avg'] > 0)
+        # Filter extreme BIF values for medium traffic
+        if condition == 'Medium':
+            mask = mask & (df['bytes_in_flight_avg'] < 1e12)
+
+        x_vals = df.loc[mask, 'bytes_in_flight_avg']
+        y_vals = df.loc[mask, 'goodput_bps']
+
+        if len(x_vals) > 0:
+            ax.loglog(x_vals, y_vals, 'o', alpha=0.5, markersize=4,
+                      label=condition, color=COLORS[condition])
+
+    ax.set_xlabel('Bytes In Flight (bytes) - Log Scale')
+    ax.set_ylabel('Goodput (bps) - Log Scale')
+    ax.set_title('GRAPH 18: Goodput vs BIF (Log-Log)\n(The Collapse Curve Across Conditions)')
+    ax.legend()
+    ax.grid(True, alpha=0.3, which='both')
+    save_fig('18_Goodput_vs_BIF_Combined.png')
+
+
+def graph_19_retrans_cost_function(df):
+    """GRAPH 19: Retransmission Cost Function"""
+    print("📊 Generating GRAPH 19: Retransmission Cost Function")
+    fig, ax = plt.subplots()
+
+    for condition in ['Normal', 'Medium', 'High']:
+        mask = df['condition'] == condition
+        subset = df[mask].copy()
+
+        # Group by retransmission count
+        grouped = subset.groupby('retransmissions')['goodput_bps'].mean().reset_index()
+        grouped = grouped[grouped['retransmissions'] <= 20]  # Focus on lower range
+
+        if len(grouped) > 0:
+            ax.plot(grouped['retransmissions'], grouped['goodput_bps'],
+                    'o-', label=condition, color=COLORS[condition], markersize=6)
+
+    ax.set_xlabel('Retransmissions')
+    ax.set_ylabel('Average Goodput (bps)')
+    ax.set_title('GRAPH 19: Retransmission Cost Function\n(First Retransmissions Cause Disproportionate Damage)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    save_fig('19_Retrans_Cost_Function.png')
+
+
+def graph_20_rtt_proxy_vs_retransmissions(df):
+    """GRAPH 20: RTT Proxy vs Retransmissions"""
+    print("📊 Generating GRAPH 20: RTT Proxy vs Retransmissions")
+    fig, ax = plt.subplots()
+
+    for condition in ['Normal', 'Medium', 'High']:
+        mask = df['condition'] == condition
+        subset = df[mask].copy()
+
+        # Use bytes_in_flight as RTT proxy
+        throughput_safe = np.where(subset['throughput_bps'] > 0, subset['throughput_bps'] / 8, 1)
+        rtt_proxy = np.clip(subset['bytes_in_flight_avg'] / throughput_safe, 0, 1)
+
+        # Filter for plotting
+        valid_mask = (rtt_proxy < 1) & (subset['retransmissions'] < 100)
+
+        ax.scatter(rtt_proxy[valid_mask], subset.loc[valid_mask, 'retransmissions'],
+                   alpha=0.5, s=15, label=condition, color=COLORS[condition])
+
+    ax.set_xlabel('RTT Proxy (seconds) - from BIF/Throughput')
+    ax.set_ylabel('Retransmissions')
+    ax.set_title('GRAPH 20: RTT Proxy vs Retransmissions\n(RTT Inflation Precedes Retransmission Spikes)')
+    ax.legend()
+    ax.grid(True, alpha=0.3)
+    save_fig('20_RTT_vs_Retransmissions.png')
+
+
+# ============================================
+# MAIN EXECUTION
+# ============================================
+
+def main():
+    print("=" * 60)
+    print("TCP PERFORMANCE METRICS - GRAPH GENERATOR")
+    print("=" * 60)
+    print(f"Matplotlib backend: {matplotlib.get_backend()}")
+
+    # Load data
+    normal_df, medium_df, high_df, all_df = load_data()
+
+    if normal_df is None:
+        print("\n❌ Failed to load data. Please check file paths.")
+        print("\n💡 TIPS:")
+        print("   1. Use raw strings: r'D:\\path\\to\\file.csv'")
+        print("   2. Or use forward slashes: 'D:/path/to/file.csv'")
+        print("   3. Make sure files exist at the specified paths")
+        return
+
+    print(f"\n📁 Output directory: {OUTPUT_DIR}")
+    print("\n" + "=" * 60)
+    print("GENERATING 20 GRAPHS")
+    print("=" * 60)
+
+    # Generate all 20 graphs
+    graph_01_bif_vs_throughput(all_df)
+    graph_02_sack_vs_retransmissions(all_df)
+    graph_03_window_vs_throughput(all_df)
+    graph_04_bif_vs_time(normal_df, medium_df, high_df)
+    graph_05_retransmissions_vs_goodput(all_df)
+    graph_06_sack_vs_dupacks(all_df)
+    graph_07_bif_vs_sack(all_df)
+
+    graph_08_cumulative_retransmissions(normal_df, medium_df, high_df)
+    graph_09_retrans_rate_vs_time(normal_df, medium_df, high_df)
+    graph_10_normalized_throughput(all_df)
+    graph_11_sack_efficiency(all_df)
+    graph_12_estimated_cwnd_vs_time(all_df)
+    graph_13_inter_retrans_histogram(all_df)
+    graph_14_bif_vs_dupacks(all_df)
+    graph_15_throughput_vs_retrans_rate(all_df)
+    graph_16_window_vs_time_panel(all_df)
+    graph_17_zero_window_vs_time(all_df)
+    graph_18_goodput_vs_bif_combined(normal_df, medium_df, high_df)
+    graph_19_retrans_cost_function(all_df)
+    graph_20_rtt_proxy_vs_retransmissions(all_df)
+
+    print("\n" + "=" * 60)
+    print(f"✅ ALL 20 GRAPHS GENERATED SUCCESSFULLY!")
+    print(f"📁 Saved to: {OUTPUT_DIR}")
+    print("=" * 60)
+
+    # Print summary statistics
+    print("\n📊 SUMMARY STATISTICS FOR BLOG")
+    print("-" * 50)
+
+    for name, df in [('Normal', normal_df), ('Medium', medium_df), ('High', high_df)]:
+        print(f"\n{name} Traffic:")
+        print(f"  Max Retransmissions: {df['retransmissions'].max()}")
+        print(f"  Max SACK Count: {df['sack_count'].max()}")
+        print(f"  Max DupACKs: {df['dupacks'].max()}")
+        print(f"  Max BIF: {df['bytes_in_flight_max'].max():.2e} bytes")
+        print(f"  Peak Throughput: {df['throughput_bps'].max():.2f} bps")
+        print(f"  Peak Goodput: {df['goodput_bps'].max():.2f} bps")
+
+
+if __name__ == "__main__":
+    main()
